@@ -13,11 +13,9 @@ const promSchema = z.promise(
 
 test("promise inference", () => {
   type promSchemaType = z.infer<typeof promSchema>;
-  const t1: util.AssertEqual<
-    promSchemaType,
-    Promise<{ name: string; age: number }>
-  > = true;
-  expect(t1).toBeTruthy();
+  util.assertEqual<promSchemaType, Promise<{ name: string; age: number }>>(
+    true
+  );
 });
 
 test("promise parsing success", async () => {
@@ -87,4 +85,10 @@ test("async function fail", async () => {
 test("async promise parsing", () => {
   const res = z.promise(z.number()).parseAsync(Promise.resolve(12));
   expect(res).toBeInstanceOf(Promise);
+});
+
+test("resolves", () => {
+  const foo = z.literal("foo");
+  const res = z.promise(foo);
+  expect(res.unwrap()).toEqual(foo);
 });

@@ -17,19 +17,17 @@ const recordWithLiteralKeys = z.record(
 type recordWithLiteralKeys = z.infer<typeof recordWithLiteralKeys>;
 
 test("type inference", () => {
-  const f1: util.AssertEqual<booleanRecord, Record<string, boolean>> = true;
-  f1;
+  util.assertEqual<booleanRecord, Record<string, boolean>>(true);
 
-  const f2: util.AssertEqual<
+  util.assertEqual<
     recordWithEnumKeys,
-    Record<"Tuna" | "Salmon", string>
-  > = true;
-  f2;
-  const f3: util.AssertEqual<
+    Partial<Record<"Tuna" | "Salmon", string>>
+  >(true);
+
+  util.assertEqual<
     recordWithLiteralKeys,
-    Record<"Tuna" | "Salmon", string>
-  > = true;
-  f3;
+    Partial<Record<"Tuna" | "Salmon", string>>
+  >(true);
 });
 
 test("methods", () => {
@@ -90,6 +88,22 @@ test("key schema", () => {
     Salmon: "asdf",
   });
 
+  // shouldn't require us to specify all props in record
+  const result3 = recordWithEnumKeys.parse({
+    Tuna: "abcd",
+  });
+  expect(result3).toEqual({
+    Tuna: "abcd",
+  });
+
+  // shouldn't require us to specify all props in record
+  const result4 = recordWithLiteralKeys.parse({
+    Salmon: "abcd",
+  });
+  expect(result4).toEqual({
+    Salmon: "abcd",
+  });
+
   expect(() =>
     recordWithEnumKeys.parse({
       Tuna: "asdf",
@@ -118,4 +132,49 @@ test("key and value getters", () => {
   rec.keySchema.parse("asdf");
   rec.valueSchema.parse(1234);
   rec.element.parse(1234);
+});
+
+test("is not vulnerable to prototype pollution", async () => {
+  const rec = z.record(
+    z.object({
+      a: z.string(),
+    })
+  );
+
+  const data = JSON.parse(`
+    {
+      "__proto__": {
+        "a": "evil"
+      },
+      "b": {
+        "a": "good"
+      }
+    }
+  `);
+
+  const obj1 = rec.parse(data);
+  expect(obj1.a).toBeUndefined();
+
+  const obj2 = rec.safeParse(data);
+  expect(obj2.success).toBe(true);
+  if (obj2.success) {
+    expect(obj2.data.a).toBeUndefined();
+  }
+
+  const obj3 = await rec.parseAsync(data);
+  expect(obj3.a).toBeUndefined();
+
+  const obj4 = await rec.safeParseAsync(data);
+  expect(obj4.success).toBe(true);
+  if (obj4.success) {
+    expect(obj4.data.a).toBeUndefined();
+  }
+});
+
+test("dont parse undefined values", () => {
+  const result1 = z.record(z.any()).parse({ foo: undefined });
+
+  expect(result1).toEqual({
+    foo: undefined,
+  });
 });

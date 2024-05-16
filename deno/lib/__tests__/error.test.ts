@@ -2,7 +2,7 @@
 import { expect } from "https://deno.land/x/expect@v0.2.6/mod.ts";
 const test = Deno.test;
 
-import { ZodParsedType } from "../helpers/parseUtil.ts";
+import { ZodParsedType } from "../helpers/util.ts";
 import * as z from "../index.ts";
 import { ZodError, ZodIssueCode } from "../ZodError.ts";
 
@@ -14,6 +14,7 @@ test("error creation", () => {
     received: ZodParsedType.string,
     path: [],
     message: "",
+    fatal: true,
   });
   err1.isEmpty;
 
@@ -295,13 +296,64 @@ test("formatting", () => {
     expect(error.inner?.name?.[1]).toEqual(undefined);
   }
   if (!result2.success) {
-    const error = result2.error.format();
+    type FormattedError = z.inferFormattedError<typeof schema>;
+    const error: FormattedError = result2.error.format();
     expect(error._errors).toEqual([]);
     expect(error.inner?._errors).toEqual([]);
     expect(error.inner?.name?._errors).toEqual(["Invalid input"]);
     expect(error.inner?.name?.[0]).toEqual(undefined);
     expect(error.inner?.name?.[1]).toEqual(undefined);
     expect(error.inner?.name?.[2]).toEqual(undefined);
+  }
+
+  // test custom mapper
+  if (!result2.success) {
+    type FormattedError = z.inferFormattedError<typeof schema, number>;
+    const error: FormattedError = result2.error.format(() => 5);
+    expect(error._errors).toEqual([]);
+    expect(error.inner?._errors).toEqual([]);
+    expect(error.inner?.name?._errors).toEqual([5]);
+  }
+});
+
+test("formatting with nullable and optional fields", () => {
+  const nameSchema = z.string().refine((val) => val.length > 5);
+  const schema = z.object({
+    nullableObject: z.object({ name: nameSchema }).nullable(),
+    nullableArray: z.array(nameSchema).nullable(),
+    nullableTuple: z.tuple([nameSchema, nameSchema, z.number()]).nullable(),
+    optionalObject: z.object({ name: nameSchema }).optional(),
+    optionalArray: z.array(nameSchema).optional(),
+    optionalTuple: z.tuple([nameSchema, nameSchema, z.number()]).optional(),
+  });
+  const invalidItem = {
+    nullableObject: { name: "abcd" },
+    nullableArray: ["abcd"],
+    nullableTuple: ["abcd", "abcd", 1],
+    optionalObject: { name: "abcd" },
+    optionalArray: ["abcd"],
+    optionalTuple: ["abcd", "abcd", 1],
+  };
+  const result = schema.safeParse(invalidItem);
+  expect(result.success).toEqual(false);
+  if (!result.success) {
+    type FormattedError = z.inferFormattedError<typeof schema>;
+    const error: FormattedError = result.error.format();
+    expect(error._errors).toEqual([]);
+    expect(error.nullableObject?._errors).toEqual([]);
+    expect(error.nullableObject?.name?._errors).toEqual(["Invalid input"]);
+    expect(error.nullableArray?._errors).toEqual([]);
+    expect(error.nullableArray?.[0]?._errors).toEqual(["Invalid input"]);
+    expect(error.nullableTuple?._errors).toEqual([]);
+    expect(error.nullableTuple?.[0]?._errors).toEqual(["Invalid input"]);
+    expect(error.nullableTuple?.[1]?._errors).toEqual(["Invalid input"]);
+    expect(error.optionalObject?._errors).toEqual([]);
+    expect(error.optionalObject?.name?._errors).toEqual(["Invalid input"]);
+    expect(error.optionalArray?._errors).toEqual([]);
+    expect(error.optionalArray?.[0]?._errors).toEqual(["Invalid input"]);
+    expect(error.optionalTuple?._errors).toEqual([]);
+    expect(error.optionalTuple?.[0]?._errors).toEqual(["Invalid input"]);
+    expect(error.optionalTuple?.[1]?._errors).toEqual(["Invalid input"]);
   }
 });
 
@@ -367,7 +419,7 @@ test("invalid and required", () => {
   }
 });
 
-test("Fallback to invalid_type_error without required_error", () => {
+test("Fallback to default required error", () => {
   const str = z.string({
     invalid_type_error: "Invalid name",
     // required_error: "Name is required",
@@ -376,7 +428,7 @@ test("Fallback to invalid_type_error without required_error", () => {
   const result2 = str.safeParse(undefined);
   expect(result2.success).toEqual(false);
   if (!result2.success) {
-    expect(result2.error.issues[0].message).toEqual("Invalid name");
+    expect(result2.error.issues[0].message).toEqual("Required");
   }
 });
 
@@ -400,16 +452,43 @@ test("strict error message", () => {
   }
 });
 
-test("enum default error message", () => {
+test("enum error message, invalid enum elementstring", () => {
   try {
     z.enum(["Tuna", "Trout"]).parse("Salmon");
   } catch (err) {
     const zerr: z.ZodError = err as any;
     expect(zerr.issues.length).toEqual(1);
     expect(zerr.issues[0].message).toEqual(
-      "Invalid enum value. Expected 'Tuna' | 'Trout'"
+      "Invalid enum value. Expected 'Tuna' | 'Trout', received 'Salmon'"
     );
-    expect(zerr.issues[0].message).not.toContain("Salmon");
+  }
+});
+
+test("enum error message, invalid type", () => {
+  try {
+    z.enum(["Tuna", "Trout"]).parse(12);
+  } catch (err) {
+    const zerr: z.ZodError = err as any;
+    expect(zerr.issues.length).toEqual(1);
+    expect(zerr.issues[0].message).toEqual(
+      "Expected 'Tuna' | 'Trout', received number"
+    );
+  }
+});
+
+test("nativeEnum default error message", () => {
+  enum Fish {
+    Tuna = "Tuna",
+    Trout = "Trout",
+  }
+  try {
+    z.nativeEnum(Fish).parse("Salmon");
+  } catch (err) {
+    const zerr: z.ZodError = err as any;
+    expect(zerr.issues.length).toEqual(1);
+    expect(zerr.issues[0].message).toEqual(
+      "Invalid enum value. Expected 'Tuna' | 'Trout', received 'Salmon'"
+    );
   }
 });
 
@@ -419,7 +498,63 @@ test("literal default error message", () => {
   } catch (err) {
     const zerr: z.ZodError = err as any;
     expect(zerr.issues.length).toEqual(1);
-    expect(zerr.issues[0].message).toEqual("Expected string, received string");
+    expect(zerr.issues[0].message).toEqual(
+      `Invalid literal value, expected "Tuna"`
+    );
+  }
+});
+
+test("literal bigint default error message", () => {
+  try {
+    z.literal(BigInt(12)).parse(BigInt(13));
+  } catch (err) {
+    const zerr: z.ZodError = err as any;
+    expect(zerr.issues.length).toEqual(1);
+    expect(zerr.issues[0].message).toEqual(
+      `Invalid literal value, expected "12"`
+    );
+  }
+});
+
+test("enum with message returns the custom error message", () => {
+  const schema = z.enum(["apple", "banana"], {
+    message: "the value provided is invalid",
+  });
+
+  const result1 = schema.safeParse("berries");
+  expect(result1.success).toEqual(false);
+  if (!result1.success) {
+    expect(result1.error.issues[0].message).toEqual(
+      "the value provided is invalid"
+    );
+  }
+
+  const result2 = schema.safeParse(undefined);
+  expect(result2.success).toEqual(false);
+  if (!result2.success) {
+    expect(result2.error.issues[0].message).toEqual(
+      "the value provided is invalid"
+    );
+  }
+
+  const result3 = schema.safeParse("banana");
+  expect(result3.success).toEqual(true);
+
+  const result4 = schema.safeParse(null);
+  expect(result4.success).toEqual(false);
+  if (!result4.success) {
+    expect(result4.error.issues[0].message).toEqual(
+      "the value provided is invalid"
+    );
+  }
+});
+
+test("when the message is falsy, it is used as is provided", () => {
+  const schema = z.string().max(1, { message: "" });
+  const result = schema.safeParse("asdf");
+  expect(result.success).toEqual(false);
+  if (!result.success) {
+    expect(result.error.issues[0].message).toEqual("");
   }
 });
 

@@ -1,3 +1,4 @@
+// @ts-ignore TS6133
 import { expect } from "https://deno.land/x/expect@v0.2.6/mod.ts";
 const test = Deno.test;
 
@@ -12,6 +13,8 @@ test("first party switch", () => {
     case z.ZodFirstPartyTypeKind.ZodString:
       break;
     case z.ZodFirstPartyTypeKind.ZodNumber:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodNaN:
       break;
     case z.ZodFirstPartyTypeKind.ZodBigInt:
       break;
@@ -36,6 +39,8 @@ test("first party switch", () => {
     case z.ZodFirstPartyTypeKind.ZodObject:
       break;
     case z.ZodFirstPartyTypeKind.ZodUnion:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodDiscriminatedUnion:
       break;
     case z.ZodFirstPartyTypeKind.ZodIntersection:
       break;
@@ -65,7 +70,17 @@ test("first party switch", () => {
       break;
     case z.ZodFirstPartyTypeKind.ZodDefault:
       break;
+    case z.ZodFirstPartyTypeKind.ZodCatch:
+      break;
     case z.ZodFirstPartyTypeKind.ZodPromise:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodBranded:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodPipeline:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodSymbol:
+      break;
+    case z.ZodFirstPartyTypeKind.ZodReadonly:
       break;
     default:
       util.assertNever(def);

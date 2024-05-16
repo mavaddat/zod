@@ -11,6 +11,88 @@ const stringToNumber = z.string().transform((arg) => parseFloat(arg));
 //   .transform((n) => String(n));
 const asyncNumberToString = z.number().transform(async (n) => String(n));
 
+test("transform ctx.addIssue with parse", () => {
+  const strs = ["foo", "bar"];
+
+  expect(() => {
+    z.string()
+      .transform((data, ctx) => {
+        const i = strs.indexOf(data);
+        if (i === -1) {
+          ctx.addIssue({
+            code: "custom",
+            message: `${data} is not one of our allowed strings`,
+          });
+        }
+        return data.length;
+      })
+      .parse("asdf");
+  }).toThrow(
+    JSON.stringify(
+      [
+        {
+          code: "custom",
+          message: "asdf is not one of our allowed strings",
+          path: [],
+        },
+      ],
+      null,
+      2
+    )
+  );
+});
+
+test("transform ctx.addIssue with parseAsync", async () => {
+  const strs = ["foo", "bar"];
+
+  const result = await z
+    .string()
+    .transform(async (data, ctx) => {
+      const i = strs.indexOf(data);
+      if (i === -1) {
+        ctx.addIssue({
+          code: "custom",
+          message: `${data} is not one of our allowed strings`,
+        });
+      }
+      return data.length;
+    })
+    .safeParseAsync("asdf");
+
+  expect(JSON.parse(JSON.stringify(result))).toEqual({
+    success: false,
+    error: {
+      issues: [
+        {
+          code: "custom",
+          message: "asdf is not one of our allowed strings",
+          path: [],
+        },
+      ],
+      name: "ZodError",
+    },
+  });
+});
+
+test("z.NEVER in transform", () => {
+  const foo = z
+    .number()
+    .optional()
+    .transform((val, ctx) => {
+      if (!val) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "bad" });
+        return z.NEVER;
+      }
+      return val;
+    });
+  type foo = z.infer<typeof foo>;
+  util.assertEqual<foo, number>(true);
+  const arg = foo.safeParse(undefined);
+  if (!arg.success) {
+    expect(arg.error.issues[0].message).toEqual("bad");
+  }
+});
+
 test("basic transformations", () => {
   const r1 = z
     .string()
@@ -96,10 +178,8 @@ test("object typing", () => {
   type t1 = z.input<typeof t1>;
   type t2 = z.output<typeof t1>;
 
-  const f1: util.AssertEqual<t1, { stringToNumber: string }> = true;
-  const f2: util.AssertEqual<t2, { stringToNumber: number }> = true;
-  f1;
-  f2;
+  util.assertEqual<t1, { stringToNumber: string }>(true);
+  util.assertEqual<t2, { stringToNumber: number }>(true);
 });
 
 test("transform method overloads", () => {
@@ -115,20 +195,6 @@ test("multiple transformers", () => {
     return val * 2;
   });
   expect(doubler.parse("5")).toEqual(10);
-});
-
-test("preprocess", () => {
-  const schema = z.preprocess((data) => [data], z.string().array());
-
-  const value = schema.parse("asdf");
-  expect(value).toEqual(["asdf"]);
-});
-
-test("async preprocess", async () => {
-  const schema = z.preprocess(async (data) => [data], z.string().array());
-
-  const value = await schema.parseAsync("asdf");
-  expect(value).toEqual(["asdf"]);
 });
 
 test("short circuit on dirty", () => {

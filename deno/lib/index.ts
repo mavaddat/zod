@@ -1,3 +1,4 @@
-import * as mod from "./external.ts";
+import * as z from "./external.ts";
 export * from "./external.ts";
-export { mod as z };
+export { z };
+export default z;

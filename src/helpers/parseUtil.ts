@@ -1,106 +1,7 @@
-import {
-  defaultErrorMap,
-  IssueData,
-  overrideErrorMap,
-  ZodErrorMap,
-  ZodIssue,
-} from "../ZodError";
-import { util } from "./util";
-
-export const ZodParsedType = util.arrayToEnum([
-  "string",
-  "nan",
-  "number",
-  "integer",
-  "float",
-  "boolean",
-  "date",
-  "bigint",
-  "symbol",
-  "function",
-  "undefined",
-  "null",
-  "array",
-  "object",
-  "unknown",
-  "promise",
-  "void",
-  "never",
-  "map",
-  "set",
-]);
-
-export type ZodParsedType = keyof typeof ZodParsedType;
-
-function cacheAndReturn(
-  data: any,
-  parsedType: ZodParsedType,
-  cache?: Map<any, ZodParsedType>
-) {
-  if (cache) cache.set(data, parsedType);
-  return parsedType;
-}
-
-export const getParsedType = (
-  data: any,
-  cache?: Map<any, ZodParsedType>
-): ZodParsedType => {
-  if (cache && cache.has(data)) return cache.get(data)!;
-  const t = typeof data;
-
-  switch (t) {
-    case "undefined":
-      return cacheAndReturn(data, ZodParsedType.undefined, cache);
-
-    case "string":
-      return cacheAndReturn(data, ZodParsedType.string, cache);
-
-    case "number":
-      return cacheAndReturn(
-        data,
-        isNaN(data) ? ZodParsedType.nan : ZodParsedType.number,
-        cache
-      );
-
-    case "boolean":
-      return cacheAndReturn(data, ZodParsedType.boolean, cache);
-
-    case "function":
-      return cacheAndReturn(data, ZodParsedType.function, cache);
-
-    case "bigint":
-      return cacheAndReturn(data, ZodParsedType.bigint, cache);
-
-    case "object":
-      if (Array.isArray(data)) {
-        return cacheAndReturn(data, ZodParsedType.array, cache);
-      }
-      if (data === null) {
-        return cacheAndReturn(data, ZodParsedType.null, cache);
-      }
-      if (
-        data.then &&
-        typeof data.then === "function" &&
-        data.catch &&
-        typeof data.catch === "function"
-      ) {
-        return cacheAndReturn(data, ZodParsedType.promise, cache);
-      }
-      if (typeof Map !== "undefined" && data instanceof Map) {
-        return cacheAndReturn(data, ZodParsedType.map, cache);
-      }
-      if (typeof Set !== "undefined" && data instanceof Set) {
-        return cacheAndReturn(data, ZodParsedType.set, cache);
-      }
-      if (typeof Date !== "undefined" && data instanceof Date) {
-        return cacheAndReturn(data, ZodParsedType.date, cache);
-      }
-      return cacheAndReturn(data, ZodParsedType.object, cache);
-
-    default:
-      return cacheAndReturn(data, ZodParsedType.unknown, cache);
-  }
-};
+import { getErrorMap } from "../errors";
+import defaultErrorMap from "../locales/en";
+import type { IssueData, ZodErrorMap, ZodIssue } from "../ZodError";
+import type { ZodParsedType } from "./util";
 
 export const makeIssue = (params: {
   data: any;
@@ -115,6 +16,14 @@ export const makeIssue = (params: {
     path: fullPath,
   };
 
+  if (issueData.message !== undefined) {
+    return {
+      ...issueData,
+      path: fullPath,
+      message: issueData.message,
+    };
+  }
+
   let errorMessage = "";
   const maps = errorMaps
     .filter((m) => !!m)
@@ -127,7 +36,7 @@ export const makeIssue = (params: {
   return {
     ...issueData,
     path: fullPath,
-    message: issueData.message || errorMessage,
+    message: errorMessage,
   };
 };
 
@@ -142,13 +51,14 @@ export type ParsePath = ParsePathComponent[];
 export const EMPTY_PATH: ParsePath = [];
 
 export interface ParseContext {
+  readonly common: {
+    readonly issues: ZodIssue[];
+    readonly contextualErrorMap?: ZodErrorMap;
+    readonly async: boolean;
+  };
   readonly path: ParsePath;
-  readonly issues: ZodIssue[];
   readonly schemaErrorMap?: ZodErrorMap;
-  readonly contextualErrorMap?: ZodErrorMap;
-  readonly async: boolean;
   readonly parent: ParseContext | null;
-  readonly typeCache: Map<any, ZodParsedType> | undefined;
   readonly data: any;
   readonly parsedType: ZodParsedType;
 }
@@ -163,18 +73,19 @@ export function addIssueToContext(
   ctx: ParseContext,
   issueData: IssueData
 ): void {
+  const overrideMap = getErrorMap();
   const issue = makeIssue({
     issueData: issueData,
     data: ctx.data,
     path: ctx.path,
     errorMaps: [
-      ctx.contextualErrorMap, // contextual error map is first priority
+      ctx.common.contextualErrorMap, // contextual error map is first priority
       ctx.schemaErrorMap, // then schema-bound map if available
-      overrideErrorMap, // then global override map
-      defaultErrorMap, // then global default map
+      overrideMap, // then global override map
+      overrideMap === defaultErrorMap ? undefined : defaultErrorMap, // then global default map
     ].filter((x) => !!x) as ZodErrorMap[],
   });
-  ctx.issues.push(issue);
+  ctx.common.issues.push(issue);
 }
 
 export type ObjectPair = {
@@ -210,9 +121,11 @@ export class ParseStatus {
   ): Promise<SyncParseReturnType<any>> {
     const syncPairs: ObjectPair[] = [];
     for (const pair of pairs) {
+      const key = await pair.key;
+      const value = await pair.value;
       syncPairs.push({
-        key: await pair.key,
-        value: await pair.value,
+        key,
+        value,
       });
     }
     return ParseStatus.mergeObjectSync(status, syncPairs);
@@ -234,7 +147,10 @@ export class ParseStatus {
       if (key.status === "dirty") status.dirty();
       if (value.status === "dirty") status.dirty();
 
-      if (typeof value.value !== "undefined" || pair.alwaysSet) {
+      if (
+        key.value !== "__proto__" &&
+        (typeof value.value !== "undefined" || pair.alwaysSet)
+      ) {
         finalObject[key.value] = value.value;
       }
     }
@@ -268,9 +184,9 @@ export const isAborted = (x: ParseReturnType<any>): x is INVALID =>
   (x as any).status === "aborted";
 export const isDirty = <T>(x: ParseReturnType<T>): x is OK<T> | DIRTY<T> =>
   (x as any).status === "dirty";
-export const isValid = <T>(x: ParseReturnType<T>): x is OK<T> | DIRTY<T> =>
+export const isValid = <T>(x: ParseReturnType<T>): x is OK<T> =>
   (x as any).status === "valid";
 export const isAsync = <T>(
   x: ParseReturnType<T>
 ): x is AsyncParseReturnType<T> =>
-  typeof Promise !== undefined && x instanceof Promise;
+  typeof Promise !== "undefined" && x instanceof Promise;

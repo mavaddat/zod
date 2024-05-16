@@ -26,26 +26,51 @@ test("parsed function fail 2", () => {
 
 test("function inference 1", () => {
   type func1 = z.TypeOf<typeof func1>;
-  const t1: util.AssertEqual<func1, (k: string) => number> = true;
-  [t1];
+  util.assertEqual<func1, (k: string) => number>(true);
+});
+
+test("method parsing", () => {
+  const methodObject = z.object({
+    property: z.number(),
+    method: z.function().args(z.string()).returns(z.number()),
+  });
+  const methodInstance = {
+    property: 3,
+    method: function (s: string) {
+      return s.length + this.property;
+    },
+  };
+  const parsed = methodObject.parse(methodInstance);
+  expect(parsed.method("length=8")).toBe(11); // 8 length + 3 property
+});
+
+test("async method parsing", async () => {
+  const methodObject = z.object({
+    property: z.number(),
+    method: z.function().args(z.string()).returns(z.promise(z.number())),
+  });
+  const methodInstance = {
+    property: 3,
+    method: async function (s: string) {
+      return s.length + this.property;
+    },
+  };
+  const parsed = methodObject.parse(methodInstance);
+  expect(await parsed.method("length=8")).toBe(11); // 8 length + 3 property
 });
 
 test("args method", () => {
   const t1 = z.function();
   type t1 = z.infer<typeof t1>;
-  const f1: util.AssertEqual<t1, () => void> = true;
+  util.assertEqual<t1, (...args_1: unknown[]) => unknown>(true);
 
   const t2 = t1.args(z.string());
   type t2 = z.infer<typeof t2>;
-  const f2: util.AssertEqual<t2, (arg: string) => void> = true;
+  util.assertEqual<t2, (arg: string, ...args_1: unknown[]) => unknown>(true);
 
   const t3 = t2.returns(z.boolean());
   type t3 = z.infer<typeof t3>;
-  const f3: util.AssertEqual<t3, (arg: string) => boolean> = true;
-
-  f1;
-  f2;
-  f3;
+  util.assertEqual<t3, (arg: string, ...args_1: unknown[]) => boolean>(true);
 });
 
 const args2 = z.tuple([
@@ -61,15 +86,14 @@ const func2 = z.function(args2, returns2);
 
 test("function inference 2", () => {
   type func2 = z.TypeOf<typeof func2>;
-  const t2: util.AssertEqual<
+  util.assertEqual<
     func2,
     (arg: {
       f1: number;
       f2: string | null;
       f3?: (boolean | undefined)[] | undefined;
     }) => string | number
-  > = true;
-  [t2];
+  >(true);
 });
 
 test("valid function run", () => {
@@ -115,6 +139,8 @@ test("output validation error", () => {
 
   expect(checker).toThrow();
 });
+
+z.function(z.tuple([z.string()])).args()._def.args;
 
 test("special function error codes", () => {
   const checker = z
@@ -211,4 +237,36 @@ test("params and returnType getters", () => {
 
   func.parameters().items[0].parse("asdf");
   func.returnType().parse("asdf");
+});
+
+test("inference with transforms", () => {
+  const funcSchema = z
+    .function()
+    .args(z.string().transform((val) => val.length))
+    .returns(z.object({ val: z.number() }));
+  const myFunc = funcSchema.implement((val) => {
+    return { val, extra: "stuff" };
+  });
+  myFunc("asdf");
+
+  util.assertEqual<
+    typeof myFunc,
+    (arg: string, ...args_1: unknown[]) => { val: number; extra: string }
+  >(true);
+});
+
+test("fallback to OuterTypeOfFunction", () => {
+  const funcSchema = z
+    .function()
+    .args(z.string().transform((val) => val.length))
+    .returns(z.object({ arg: z.number() }).transform((val) => val.arg));
+
+  const myFunc = funcSchema.implement((val) => {
+    return { arg: val, arg2: false };
+  });
+
+  util.assertEqual<
+    typeof myFunc,
+    (arg: string, ...args_1: unknown[]) => number
+  >(true);
 });

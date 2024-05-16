@@ -14,13 +14,16 @@ const fish = z.object({
 test("pick type inference", () => {
   const nameonlyFish = fish.pick({ name: true });
   type nameonlyFish = z.infer<typeof nameonlyFish>;
-  const f1: util.AssertEqual<nameonlyFish, { name: string }> = true;
-  f1;
+  util.assertEqual<nameonlyFish, { name: string }>(true);
 });
 
 test("pick parse - success", () => {
   const nameonlyFish = fish.pick({ name: true });
   nameonlyFish.parse({ name: "bob" });
+
+  // @ts-expect-error checking runtime picks `name` only.
+  const anotherNameonlyFish = fish.pick({ name: true, age: false });
+  anotherNameonlyFish.parse({ name: "bob" });
 });
 
 test("pick parse - fail", () => {
@@ -33,21 +36,29 @@ test("pick parse - fail", () => {
   const bad2 = () => nameonlyFish.parse({ name: "bob", age: 12 } as any);
   const bad3 = () => nameonlyFish.parse({ age: 12 } as any);
 
+  // @ts-expect-error checking runtime picks `name` only.
+  const anotherNameonlyFish = fish.pick({ name: true, age: false }).strict();
+  const bad4 = () => anotherNameonlyFish.parse({ name: "bob", age: 12 } as any);
+
   expect(bad1).toThrow();
   expect(bad2).toThrow();
   expect(bad3).toThrow();
+  expect(bad4).toThrow();
 });
 
 test("omit type inference", () => {
   const nonameFish = fish.omit({ name: true });
   type nonameFish = z.infer<typeof nonameFish>;
-  const f1: util.AssertEqual<nonameFish, { age: number; nested: {} }> = true;
-  f1;
+  util.assertEqual<nonameFish, { age: number; nested: {} }>(true);
 });
 
 test("omit parse - success", () => {
   const nonameFish = fish.omit({ name: true });
   nonameFish.parse({ age: 12, nested: {} });
+
+  // @ts-expect-error checking runtime omits `name` only.
+  const anotherNonameFish = fish.omit({ name: true, age: false });
+  anotherNonameFish.parse({ age: 12, nested: {} });
 });
 
 test("omit parse - fail", () => {
@@ -56,29 +67,46 @@ test("omit parse - fail", () => {
   const bad2 = () => nonameFish.parse({ age: 12 } as any);
   const bad3 = () => nonameFish.parse({} as any);
 
+  // @ts-expect-error checking runtime omits `name` only.
+  const anotherNonameFish = fish.omit({ name: true, age: false });
+  const bad4 = () => anotherNonameFish.parse({ nested: {} } as any);
+
   expect(bad1).toThrow();
   expect(bad2).toThrow();
   expect(bad3).toThrow();
+  expect(bad4).toThrow();
 });
 
 test("nonstrict inference", () => {
-  const laxfish = fish.nonstrict().pick({ name: true });
+  const laxfish = fish.pick({ name: true }).catchall(z.any());
   type laxfish = z.infer<typeof laxfish>;
-  const f1: util.AssertEqual<
-    laxfish,
-    { [k: string]: any; name: string }
-  > = true;
-  f1;
+  util.assertEqual<laxfish, { name: string } & { [k: string]: any }>(true);
 });
 
 test("nonstrict parsing - pass", () => {
-  const laxfish = fish.nonstrict().pick({ name: true });
+  const laxfish = fish.passthrough().pick({ name: true });
   laxfish.parse({ name: "asdf", whatever: "asdf" });
   laxfish.parse({ name: "asdf", age: 12, nested: {} });
 });
 
 test("nonstrict parsing - fail", () => {
-  const laxfish = fish.nonstrict().pick({ name: true });
+  const laxfish = fish.passthrough().pick({ name: true });
   const bad = () => laxfish.parse({ whatever: "asdf" } as any);
   expect(bad).toThrow();
+});
+
+test("pick/omit/required/partial - do not allow unknown keys", () => {
+  const schema = z.object({
+    name: z.string(),
+    age: z.number(),
+  });
+
+  // @ts-expect-error
+  schema.pick({ $unknown: true });
+  // @ts-expect-error
+  schema.omit({ $unknown: true });
+  // @ts-expect-error
+  schema.required({ $unknown: true });
+  // @ts-expect-error
+  schema.partial({ $unknown: true });
 });
